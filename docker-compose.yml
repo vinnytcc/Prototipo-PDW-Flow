@@ -1,0 +1,125 @@
+# PDQ-Flow v1.0 — Docker Compose
+# Pipeline de Dados sobre Queimadas
+# Sobe toda a stack v1.0:
+#   banco     → PostgreSQL 16 + PostGIS 3.4 (porta 5432)
+#   pgadmin   → Interface visual do banco (porta 5050)
+#   etl       → Carga automática INPE → PostGIS (diária às 07:00 BRT)
+#   focos     → Serviço de focos individuais (porta 7001)
+#   espacial  → Serviço de consultas espaciais PostGIS (porta 7002)
+#   estatisticas → Serviço de agregações analíticas (porta 7003)
+
+services:
+
+  # Banco de Dados
+  banco:
+    image: postgis/postgis:16-3.4
+    container_name: pdqflow-banco
+    hostname: banco
+    restart: always
+    environment:
+      POSTGRES_USER:     pdqflow
+      POSTGRES_PASSWORD: pdqflow123
+      POSTGRES_DB:       queimadas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./banco/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdqflow -d queimadas"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - rede-pdqflow
+
+  # pgAdmin (interface visual) 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pdqflow-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    admin@pdqflow.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks:
+      - rede-pdqflow
+
+  # ETL (carga automática dos dados do INPE)
+  etl:
+    build: ./etl
+    container_name: pdqflow-etl
+    hostname: etl
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks:
+      - rede-pdqflow
+
+  # Serviço: Focos (porta 7001) 
+  focos:
+    build: ./servicos
+    container_name: pdqflow-focos
+    hostname: focos
+    restart: always
+    env_file: .env
+    volumes:
+      - ./servicos/focos:/app/servico
+    ports:
+      - "7001:5000"
+    command: python /app/servico/servico.py
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks:
+      - rede-pdqflow
+
+  # Serviço: Espacial (porta 7002) 
+  espacial:
+    build: ./servicos
+    container_name: pdqflow-espacial
+    hostname: espacial
+    restart: always
+    env_file: .env
+    volumes:
+      - ./servicos/espacial:/app/servico
+    ports:
+      - "7002:5000"
+    command: python /app/servico/servico.py
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks:
+      - rede-pdqflow
+
+  # Serviço: Estatísticas (porta 7003) 
+  estatisticas:
+    build: ./servicos
+    container_name: pdqflow-estatisticas
+    hostname: estatisticas
+    restart: always
+    env_file: .env
+    volumes:
+      - ./servicos/estatisticas:/app/servico
+    ports:
+      - "7003:5000"
+    command: python /app/servico/servico.py
+    depends_on:
+      banco:
+        condition: service_healthy
+    networks:
+      - rede-pdqflow
+
+# Volumes e Redes 
+volumes:
+  pgdata:
+
+networks:
+  rede-pdqflow:
+    driver: bridge

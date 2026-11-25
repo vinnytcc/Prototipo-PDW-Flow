@@ -1,0 +1,4 @@
+psycopg[binary]==3.2.3
+pandas==2.2.2
+apscheduler==3.10.4
+python-dotenv==1.0.1
